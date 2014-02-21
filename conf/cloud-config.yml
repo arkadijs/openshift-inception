@@ -1,0 +1,14 @@
+#cloud-config
+disable_root: false
+
+users:
+
+bootcmd:
+ - [ cloud-init-per, once, mkswap, /usr/sbin/mkswap, /dev/xvdb ]
+
+mounts:
+- [ ephemeral0, swap, swap ]
+
+write_files:
+- path: /etc/facter/facts.d/role.txt
+  content: role={{role}}
