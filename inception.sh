@@ -3,7 +3,7 @@
 ami=ami-f1031e85 # Fedora-x86_64-19-20130627-sda
 volumesize=10
 region=eu-west-1
-machine=m3.medium
+machine=c3.large
 keyname=arkadi
 tag=-1
 domain=openshift.r53.my-great-paas.io
