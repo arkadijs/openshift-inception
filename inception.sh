@@ -5,6 +5,7 @@ volumesize=10
 region=eu-west-1
 machine=m3.medium
 keyname=arkadi
+tag=-1
 domain=openshift.r53.my-great-paas.io
 r53_parent_zone=J5O7N3ZXQ0HTL
 # TODO security group 'openshift' must be pre-configured in region
@@ -58,7 +59,7 @@ function xml_ip() {
 }
 
 function name_instance() {
-  $aws ctags $1 --tag Name=$2
+  $aws ctags $1 --tag Name=$2$tag
 }
 
 function wait_ip() {
@@ -117,10 +118,10 @@ ssh root@$broker dnssec-keygen -a HMAC-MD5 -b 512 -n USER -r /dev/urandom -K /va
 bind_key=$(ssh root@$broker cat /var/named/K$domain'.*.key'  | awk '{print $8}')
 
 function broker_template() {
-  out=$(tempfile)
+  local out=$(tempfile)
   sed -e "s/{{broker_internal}}/$broker_internal/" broker.pp |
     sed "s/{{broker_ip}}/$broker_ip/" |
-    sed "s/{{bind_key}}/$bind_key/" |
+    sed "s|{{bind_key}}|$bind_key|" |
     sed "s/{{domain}}/$domain/" >$out
   echo $out
 }
@@ -153,8 +154,8 @@ ssh root@$broker sh bootstrap.sh
 sh -c "ssh root@$broker systemctl reboot || exit 0"
 rm $broker_pp $broker_bootstrap
 
-$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 300 -v ns1.$domain.
-$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 300 -v $broker_ip
+$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 3600 -v ns1.$domain.
+$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 3600 -v $broker_ip
 
 fi # end fast-track
 
@@ -164,7 +165,7 @@ create_instance $machine node -f $node_config
 rm $node_config
 
 function node_template() {
-  out=$(tempfile)
+  local out=$(tempfile)
   sed -e "s/{{broker_internal_ip}}/$broker_internal_ip/" node.pp |
     sed "s/{{broker_internal}}/$broker_internal/" |
     sed "s/{{bind_key}}/$bind_key/" |
