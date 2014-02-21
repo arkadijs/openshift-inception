@@ -168,7 +168,7 @@ function node_template() {
   local out=$(tempfile)
   sed -e "s/{{broker_internal_ip}}/$broker_internal_ip/" node.pp |
     sed "s/{{broker_internal}}/$broker_internal/" |
-    sed "s/{{bind_key}}/$bind_key/" |
+    sed "s|{{bind_key}}|$bind_key|" |
     sed "s/{{domain}}/$domain/" |
     sed "s/{{i}}/$i/" |
     sed "s/{{node_ip}}/$node_ip/" >$out
@@ -199,7 +199,7 @@ ssh root@$node sh bootstrap.sh
 sh -c "ssh root@$node systemctl reboot || exit 0"
 rm $node_pp $node_bootstrap
 
-echo -e '\e[0;32 === fast-track params === \e[0m'
+echo -e '\e[0;32m === fast-track params === \e[0m'
 echo broker_ip=$broker_ip
 echo broker_internal=$broker_internal
 echo broker_internal_ip=$broker_internal_ip
