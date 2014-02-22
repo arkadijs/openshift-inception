@@ -18,6 +18,7 @@ class { 'openshift_origin' :
       openshift_password1        => 'password',
 
       install_method             => 'yum',
+      repos_base                 => 'https://mirror.openshift.com/pub/origin-server/release/3/rhel-6',
       jenkins_repo_base          => 'http://pkg.jenkins-ci.org/redhat',
 
       development_mode           => true

@@ -1,10 +1,11 @@
 #!/bin/bash
 
-ami=ami-f1031e85 # Fedora-x86_64-19-20130627-sda
+ami=ami-230b1b57 # CentOS-6-x86_64-20120527-EBS, must use /dev/sda for device mapping
 volumesize=10
 region=eu-west-1
-machine=m3.medium
+machine=c3.large
 keyname=arkadi
+tag=-4
 domain=openshift.r53.my-great-paas.io
 r53_parent_zone=J5O7N3ZXQ0HTL
 # TODO security group 'openshift' must be pre-configured in region
@@ -13,7 +14,7 @@ sec_group=openshift
 # in case https://github.com/timkay/aws is not installed, please configure
 #export EC2_ACCESS_KEY=
 #export EC2_SECRET_KEY=
-aux_pkgs="bzip2 unzip nc tcpdump strace nano less curl wget deltarpm"
+aux_pkgs="bzip2 unzip nc tcpdump strace nano less curl wget deltarpm cloud-init"
 
 # end of config
 
@@ -23,7 +24,7 @@ aux_pkgs="bzip2 unzip nc tcpdump strace nano less curl wget deltarpm"
 #broker_internal_ip=172.0.0.6
 #bind_key=somekey==
 
-instance="$ami --xml --region $region -g $sec_group -k $keyname -b /dev/sda1=:$volumesize -b /dev/sdb=ephemeral0"
+instance="$ami --xml --region $region -g $sec_group -k $keyname -b /dev/sda=:$volumesize -b /dev/sdb=ephemeral0"
 
 # really end of config
 
@@ -58,7 +59,7 @@ function xml_ip() {
 }
 
 function name_instance() {
-  $aws ctags $1 --tag Name=$2
+  $aws ctags $1 --tag Name=$2$tag
 }
 
 function wait_ip() {
@@ -104,6 +105,14 @@ function cloud_config() {
   echo $out
 }
 
+repos="
+rpm --import https://fedoraproject.org/static/0608B895.txt
+rpm -i http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
+rpm -i http://yum.puppetlabs.com/el/6/products/i386/puppetlabs-release-6-10.noarch.rpm
+rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-puppetlabs
+sed -i -re 's/(\\[puppetlabs-products\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
+sed -i -re 's/(\\[puppetlabs-deps\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
+"
 
 if test -z "$broker_ip"; then
 
@@ -117,10 +126,10 @@ ssh root@$broker dnssec-keygen -a HMAC-MD5 -b 512 -n USER -r /dev/urandom -K /va
 bind_key=$(ssh root@$broker cat /var/named/K$domain'.*.key'  | awk '{print $8}')
 
 function broker_template() {
-  out=$(tempfile)
+  local out=$(tempfile)
   sed -e "s/{{broker_internal}}/$broker_internal/" broker.pp |
     sed "s/{{broker_ip}}/$broker_ip/" |
-    sed "s/{{bind_key}}/$bind_key/" |
+    sed "s|{{bind_key}}|$bind_key|" |
     sed "s/{{domain}}/$domain/" >$out
   echo $out
 }
@@ -129,32 +138,29 @@ broker_pp=$(broker_template)
 broker_bootstrap=$(tempfile)
 cat >$broker_bootstrap <<EOF
 set -e
-yum install -q -y puppet $aux_pkgs
+$repos
+yum install -q -y puppet libcgroup $aux_pkgs
 
 mkdir /etc/openshift
 puppet module install openshift/openshift_origin
 puppet apply broker.pp
-yum install -q -y openshift-origin-cartridge-jbossas
+#yum install -q -y openshift-origin-cartridge-jbossas
 
 oo-register-dns --domain $domain --with-node-hostname broker --with-node-ip $broker_ip
 oo-register-dns --domain $domain --with-node-hostname ns1    --with-node-ip $broker_ip
 
 sed -i -e 's/^VALID_GEAR_SIZES=.*/VALID_GEAR_SIZES="small,medium,large"/' /etc/openshift/broker.conf
 sed -i -e 's/^DEFAULT_GEAR_CAPABILITIES=.*/DEFAULT_GEAR_CAPABILITIES="small,medium,large"/' /etc/openshift/broker.conf
-
-systemctl enable cgconfig.service
-systemctl enable cgred.service
-systemctl unmask tmp.mount
 EOF
 
 scp $broker_pp root@$broker:broker.pp
 scp $broker_bootstrap root@$broker:bootstrap.sh
 ssh root@$broker sh bootstrap.sh
-sh -c "ssh root@$broker systemctl reboot || exit 0"
+sh -c "ssh root@$broker reboot || exit 0"
 rm $broker_pp $broker_bootstrap
 
-$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 300 -v ns1.$domain.
-$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 300 -v $broker_ip
+$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 3600 -v ns1.$domain.
+$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 3600 -v $broker_ip
 
 fi # end fast-track
 
@@ -164,10 +170,10 @@ create_instance $machine node -f $node_config
 rm $node_config
 
 function node_template() {
-  out=$(tempfile)
+  local out=$(tempfile)
   sed -e "s/{{broker_internal_ip}}/$broker_internal_ip/" node.pp |
     sed "s/{{broker_internal}}/$broker_internal/" |
-    sed "s/{{bind_key}}/$bind_key/" |
+    sed "s|{{bind_key}}|$bind_key|" |
     sed "s/{{domain}}/$domain/" |
     sed "s/{{i}}/$i/" |
     sed "s/{{node_ip}}/$node_ip/" >$out
@@ -180,25 +186,22 @@ node_pp=$(node_template)
 node_bootstrap=$(tempfile)
 cat >$node_bootstrap <<EOF
 set -e
-yum install -q -y puppet $aux_pkgs
+$repos
+yum install -q -y puppet libcgroup bind-utils $aux_pkgs
 
 mkdir /etc/openshift
 puppet module install openshift/openshift_origin
 puppet apply node.pp
-yum install -q -y openshift-origin-cartridge-jbossas
-
-systemctl enable cgconfig.service
-systemctl enable cgred.service
-systemctl unmask tmp.mount
+#yum install -q -y openshift-origin-cartridge-jbossas
 EOF
 
 scp $node_pp root@$node:node.pp
 scp $node_bootstrap root@$node:bootstrap.sh
 ssh root@$node sh bootstrap.sh
-sh -c "ssh root@$node systemctl reboot || exit 0"
+sh -c "ssh root@$node reboot || exit 0"
 rm $node_pp $node_bootstrap
 
-echo -e '\e[0;32 === fast-track params === \e[0m'
+echo -e '\e[0;32m === fast-track params === \e[0m'
 echo broker_ip=$broker_ip
 echo broker_internal=$broker_internal
 echo broker_internal_ip=$broker_internal_ip

@@ -12,6 +12,7 @@ class { 'openshift_origin' :
       node_ip_addr               => '{{node_ip}}',
 
       install_method             => 'yum',
+      repos_base                 => 'https://mirror.openshift.com/pub/origin-server/release/3/rhel-6',
       jenkins_repo_base          => 'http://pkg.jenkins-ci.org/redhat',
 
       development_mode           => true
