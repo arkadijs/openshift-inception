@@ -110,8 +110,7 @@ rpm --import https://fedoraproject.org/static/0608B895.txt
 rpm -i http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
 rpm -i http://yum.puppetlabs.com/el/6/products/i386/puppetlabs-release-6-10.noarch.rpm
 rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-puppetlabs
-sed -i -re 's/(\\[puppetlabs-products\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
-sed -i -re 's/(\\[puppetlabs-deps\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
+sed -i -re 's/(\\[puppetlabs-(products|deps)\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
 "
 
 if test -z "$broker_ip"; then
