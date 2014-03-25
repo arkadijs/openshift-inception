@@ -1,65 +1,59 @@
 #!/bin/bash
 
-ami=ami-230b1b57 # CentOS-6-x86_64-20120527-EBS, must use /dev/sda for device mapping
-volumesize=10
-region=eu-west-1
-machine=c3.large
+ami=emi-42F235E1 # built-in CentOS EMI is no good - see README-image.md
+machine=c1.xlarge
+eucarc=~/.euca/eucarc
 keyname=arkadi
-tag=-4
-domain=openshift.r53.my-great-paas.io
-r53_parent_zone=J5O7N3ZXQ0HTL
-# TODO security group 'openshift' must be pre-configured in region
-# open inbound 22, 80, 443, DNS port 53 both TCP and UDP, ICMP, from the sec.group itself (just in case)
+tag=-1
+domain=openshift.lan
+# TODO security group 'openshift' must be pre-configured
+# open inbound 22, 80, 443, DNS port 53 both TCP and UDP, all ICMP, all from the sec.group itself (just in case)
 sec_group=openshift
-# in case https://github.com/timkay/aws is not installed, please configure
-#export EC2_ACCESS_KEY=
-#export EC2_SECRET_KEY=
 aux_pkgs="bzip2 unzip nc tcpdump strace nano less curl wget deltarpm cloud-init"
+# 600MB bootstrap due to slow download
+# comment out to disable
+yum_bootstrap=http://192.168.200.3/openshift-centos-packages.tar
 
 # end of config
 
 # fast-track to node setup
-#broker_ip=54.0.0.55
-#broker_internal=ip-172-0.0.6.eu-west-1.compute.internal
-#broker_internal_ip=172.0.0.6
+#broker_ip=192.168.100.200
+#broker_internal=
+#broker_internal_ip=
 #bind_key=somekey==
 
-instance="$ami --xml --region $region -g $sec_group -k $keyname -b /dev/sda=:$volumesize -b /dev/sdb=ephemeral0"
+instance="$ami -g $sec_group -k $keyname"
 
 # really end of config
 
-if which aws2 >/dev/null; then
-  aws=aws2
+
+if which euca-run-instances >/dev/null && test -e $eucarc; then
+  . $eucarc
 else
-  if ! which perl >/dev/null; then echo Please install Perl; exit 1; fi
-  url=https://raw.github.com/timkay/aws/master/aws
-  if ! test -f aws2; then which curl >/dev/null && curl -o aws2 $url; fi
-  if ! test -f aws2; then which wget >/dev/null && wget -O aws2 $url; fi
-  if ! test -f aws2; then echo Please install Curl or Wget to download $url; exit 1; fi
-  chmod +x aws2
-  aws=./aws2
+  echo Please install euca2ools and setup $eucarc
+  exit 1
 fi
 
 set -e
 
-function xml_tag() {
-  sed -nr -e 's/.*<('$1')>(.+)<\/\1>.*/\2/p' $2 | head -1
+function extract_column() {
+  awk '{print $'$1'}' < $2 | grep -Ev 0.0.0.0
 }
 
-function xml_ip() {
+function extract_ip() {
   host=$1
   out=$(tempfile)
-  cat >$out
-  echo ${host}_id=$(xml_tag instanceId $out)
-  echo $host=$(xml_tag dnsName $out)
-  echo ${host}_ip=$(xml_tag ipAddress $out)
-  echo ${host}_internal=$(xml_tag privateDnsName $out)
-  echo ${host}_internal_ip=$(xml_tag privateIpAddress $out)
+  grep -E ^INSTANCE >$out
+  echo ${host}_id=$(extract_column 2 $out)
+  echo $host=$(extract_column 4 $out)
+  echo ${host}_ip=$(extract_column 15 $out)
+  echo ${host}_internal=$(extract_column 5 $out)
+  echo ${host}_internal_ip=$(extract_column 16 $out)
   rm $out
 }
 
 function name_instance() {
-  $aws ctags $1 --tag Name=$2$tag
+  euca-create-tags $1 --tag Name=$2$tag
 }
 
 function wait_ip() {
@@ -69,7 +63,7 @@ function wait_ip() {
   set +e
   while test -z "${!name}"; do
     sleep 10
-    eval $($aws din $id --xml | xml_ip $name)
+    eval $(euca-describe-instances $id | extract_ip $name)
     echo -n .
   done
   set -e
@@ -93,7 +87,7 @@ function create_instance() {
   local name=$2
   shift 2
   local id=${name}_id
-  eval $($aws run $instance -t $size "$@" | xml_ip $name)
+  eval $(euca-run-instances $instance -t $size "$@" | extract_ip $name)
   name_instance ${!id} $(echo $name | sed y/_/-/)
   wait_ip ${!id} $name
 }
@@ -107,10 +101,18 @@ function cloud_config() {
 
 repos="
 rpm --import https://fedoraproject.org/static/0608B895.txt
-rpm -i http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
+# the image might have EPEL already enabled, thus --force
+rpm -i --force http://dl.fedoraproject.org/pub/epel/6/x86_64/epel-release-6-8.noarch.rpm
 rpm -i http://yum.puppetlabs.com/el/6/products/i386/puppetlabs-release-6-10.noarch.rpm
 rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-puppetlabs
 sed -i -re 's/(\\[puppetlabs-(products|deps)\\])/\\1\nexclude=*mcollective* activemq/' /etc/yum.repos.d/puppetlabs.repo
+if test -n '$yum_bootstrap'; then
+  curl -sS $yum_bootstrap | tar xpC /
+  sed -i -re 's/^(keepcache).*/\1=1/' /etc/yum.conf
+fi
+#yum update -q -y
+#restorecon -R /etc
+yum install -q -y puppet libcgroup bind-utils $aux_pkgs
 "
 
 if test -z "$broker_ip"; then
@@ -138,7 +140,6 @@ broker_bootstrap=$(tempfile)
 cat >$broker_bootstrap <<EOF
 set -e
 $repos
-yum install -q -y puppet libcgroup $aux_pkgs
 
 mkdir /etc/openshift
 puppet module install openshift/openshift_origin
@@ -158,8 +159,9 @@ ssh root@$broker sh bootstrap.sh
 sh -c "ssh root@$broker reboot || exit 0"
 rm $broker_pp $broker_bootstrap
 
-$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 3600 -v ns1.$domain.
-$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 3600 -v $broker_ip
+# TODO setup DNS
+#$aws crrs $r53_parent_zone -n $domain.     -a CREATE -t NS -l 3600 -v ns1.$domain.
+#$aws crrs $r53_parent_zone -n ns1.$domain. -a CREATE -t A  -l 3600 -v $broker_ip
 
 fi # end fast-track
 
@@ -186,7 +188,6 @@ node_bootstrap=$(tempfile)
 cat >$node_bootstrap <<EOF
 set -e
 $repos
-yum install -q -y puppet libcgroup bind-utils $aux_pkgs
 
 mkdir /etc/openshift
 puppet module install openshift/openshift_origin

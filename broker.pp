@@ -11,7 +11,7 @@ class { 'openshift_origin' :
       bind_key                   => '{{bind_key}}',
       domain                     => '{{domain}}',
       register_host_with_named   => false,
-      conf_named_upstream_dns    => ['172.31.0.2'], # fixed VPC DNS
+      conf_named_upstream_dns    => ['192.168.100.2'], # set to Eucalyptus CLC IP
 
       broker_auth_plugin         => 'htpasswd',
       openshift_user1            => 'openshift',

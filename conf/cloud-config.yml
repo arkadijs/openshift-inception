@@ -3,14 +3,6 @@ disable_root: false
 
 users:
 
-bootcmd:
-# why xvdf? CentOS 6 image oddities?
-- [ cloud-init-per, once, mkswap, /sbin/mkswap, /dev/xvdf ]
-
-mounts:
-# cannot refer to xvdf as ephemeral0, thus explicit xvdf is used
-- [ xvdf, swap, swap ]
-
 write_files:
 - path: /etc/facter/facts.d/role.txt
   content: role={{role}}
