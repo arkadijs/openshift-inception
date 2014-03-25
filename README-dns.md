@@ -10,7 +10,7 @@ Enable instance DNS and DNS delegation so it looks more like real AWS. For examp
 Configure your local nameserver to delegate `cloud.lan` subdomain resolution to Cloud Controller DNS service - add `address=/cloud.lan/192.168.100.2` to your workstation `dnsmasq.conf`:
 
     $ cat >/etc/NetworkManager/dnsmasq.d/cloud.lan
-    server=/cloud.lan/192.168.11.10
+    server=/cloud.lan/eucalyptus.internal/192.168.11.10
     ^D
     $
 
